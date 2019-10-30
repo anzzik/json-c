@@ -9,12 +9,9 @@
 
 static int json_hndl_initial_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
 {
-	char c;
 	int off;
 
 	off = 0;
-	c = json_str[0];
-
 	while (json_is_ws(json_str[off]))
 		off++;
 
@@ -36,19 +33,9 @@ static int json_hndl_wkoe_cb(char *json_str, void *u_ptr, JSONParseState_t *stat
 {
 	JSONObject_t *json;
 	JSONData_t   *data;
-	char c;
 	int  off;
 	int  r;
 	char buffer[KEY_MAX_SIZE] = {'\0'};
-
-	c = json_str[0];
-
-	if (c == '}')
-	{
-		*state = READY;
-
-		return 1;
-	}
 
 	r = json_parse_key(json_str, buffer, &off);
 	if (r < 0)
@@ -65,9 +52,32 @@ static int json_hndl_wkoe_cb(char *json_str, void *u_ptr, JSONParseState_t *stat
 
 	json_object_push(json, data);
 
+	*state = WAITING_COLON;
+
+	return off;
+}
+
+static int json_hndl_colon_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
+{
+	int off;
+
+	off = 0;
+	while (json_is_ws(json_str[off]))
+		off++;
+
+	if (json_str[off] != ':')
+	{
+		fprintf(stderr, "Expected \";\" at '%s'\n", json_str + off);
+
+		return -1;
+	}
+
+	off++;
+
 	*state = WAITING_VALUE;
 
 	return off;
+
 }
 
 static int json_hndl_wv_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
@@ -79,6 +89,10 @@ static int json_hndl_wv_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
 	char buffer[LITERAL_MAX_SIZE] = {'\0'};
 	int  r;
 	int  off;
+
+	off = 0;
+	while (json_is_ws(json_str[off]))
+		off++;
 
 	json = u_ptr;
 
@@ -93,11 +107,8 @@ static int json_hndl_wv_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
 	}
 
 	data->type = type;
-
 	if (data->type == NUMBER || data->type == STRING)
-	{
 		data->val = json_data_str_new(buffer);
-	}
 
 	if (data->type == OBJECT)
 	{
@@ -114,7 +125,35 @@ static int json_hndl_wv_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
 		data->val = o;
 	}
 
-	*state = WAITING_KEY_OR_END;
+	*state = WAITING_VALUE_END;
+
+	return off;
+}
+
+static int json_hndl_wve_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
+{
+	int  off;
+	char c;
+
+	off = 0;
+	while (json_is_ws(json_str[off]))
+		off++;
+
+	c = json_str[off];
+
+	if (c != ',' && c != '}')
+	{
+		fprintf(stderr, "Expected \",\" or \"}\" at '%s'\n", json_str + off);
+		return -1;
+	}
+
+	if (c == ',')
+		*state = WAITING_KEY_OR_END;
+
+	if (c == '}')
+		*state = READY;
+
+	off++;
 
 	return off;
 }
@@ -132,7 +171,9 @@ static int json_hndl_ready_cb(char *json_str, void *u_ptr, JSONParseState_t *sta
 JSONStateHandler_t state_hndl[STATE_COUNT] = {
 	{ INITIAL, json_hndl_initial_cb },
 	{ WAITING_KEY_OR_END, json_hndl_wkoe_cb },
+	{ WAITING_COLON, json_hndl_colon_cb },
 	{ WAITING_VALUE, json_hndl_wv_cb },
+	{ WAITING_VALUE_END, json_hndl_wve_cb },
 	{ READY, json_hndl_ready_cb }
 };
 
@@ -277,12 +318,7 @@ int json_parse_key(char *str, char *output, int *offset)
 			}
 
 			if (!esc && c == '"')
-			{
-				in_quote = 0;
-				waiting_end = 1;
-
-				continue;
-			}
+				break;
 
 			output[ob_c++] = c;
 			if (esc)
@@ -304,12 +340,6 @@ int json_parse_key(char *str, char *output, int *offset)
 
 			continue;
 		}
-
-		if (json_is_ws(c))
-			continue;
-
-		if (c == ':')
-			break;
 
 		return -1;
 	}
@@ -342,11 +372,7 @@ int json_parse_value(char *str, char *output, JSONDataType_t *output_type, int *
 			}
 
 			if (!esc && c == '"')
-			{
-				in_quote = 0;
-
-				continue;
-			}
+				break;
 
 			output[ob_c++] = c;
 
@@ -355,9 +381,6 @@ int json_parse_value(char *str, char *output, JSONDataType_t *output_type, int *
 
 			continue;
 		}
-
-		if (json_is_ws(c))
-			continue;
 
 		if (c == '"')
 		{
@@ -382,18 +405,21 @@ int json_parse_value(char *str, char *output, JSONDataType_t *output_type, int *
 			type = NUMBER;
 		}
 
-		if (c == ',' || c == '}')
+		if (type == NUMBER)
 		{
-			break;
-		}
+			if (!json_is_num(c))
+			{
+				if (c != '.')
+				{
+					i--;
+					break;
+				}
+			}
 
-		if (type == NUMBER && !json_is_num(c))
-		{
-			if (c != '.')
-				return -1;
-		}
+			output[ob_c++] = c;
 
-		output[ob_c++] = c;
+			continue;
+		}
 	}
 
 	output[ob_c] = '\0';
