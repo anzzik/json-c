@@ -330,7 +330,7 @@ int json_parse_value(char *str, char *output, JSONDataType_t *output_type, int *
 	{
 		c = str[i++];
 
-		if (ob_c == LITERAL_MAX_VALUE - 1)
+		if (ob_c == LITERAL_MAX_SIZE - 1)
 		{
 			fprintf(stderr, "Value is too long\n");
 
