@@ -18,7 +18,7 @@ int json_is_object_start(char c)
 
 int json_is_ws(char c)
 {
-	if (c == ' ' || c == '\n' || c == '\t')
+	if (c == ' ' || c == '\r' || c == '\n' || c == '\t')
 		return 1;
 
 	return 0;

@@ -6,18 +6,17 @@
 
 int main(void)
 {
-	char str[] = "{ \"some key key\": [1,2], \"someotherkey\": \"some str\", \"obj_key\": { \"key\": 1, \"key2\": { \"inner_key1\": 32.5 } } }";
-	char str2[] = "[1,2,{\"a\": 1}]";
+	char *json_str;
 
-	JSONObject_t *obj = json_start(str);
-	if (!obj)
+	json_str = json_read_file("testdata.json");
+	if (!json_str)
 	{
-		fprintf(stderr, "Failed to parse JSON string\n");
+		fprintf(stderr, "File reading failed\n");
 
 		return -1;
 	}
 
-	JSONObject_t *obj2 = json_start(str2);
+	JSONObject_t *obj = json_start(json_str);
 	if (!obj)
 	{
 		fprintf(stderr, "Failed to parse JSON string\n");
@@ -26,8 +25,6 @@ int main(void)
 	}
 
 	json_print(obj);
-	printf("\n\n");
-	json_print(obj2);
 
 	return 0;
 }

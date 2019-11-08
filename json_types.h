@@ -2,7 +2,6 @@
 #define JSON_TYPES_H
 
 #define LITERAL_MAX_SIZE 1024 
-#define KEY_MAX_SIZE 64 
 
 typedef enum JSONDataType_e JSONDataType_t;
 typedef enum JSONParseState_e JSONParseState_t;

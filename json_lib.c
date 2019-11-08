@@ -172,9 +172,10 @@ char *json_data_str_new(char *buf)
 	char *key_buf;
 
 	sz = strlen(buf);
-	if (sz > KEY_MAX_SIZE)
+
+	if (sz > LITERAL_MAX_SIZE)
 	{
-		fprintf(stderr, "Requesting too big key size: %d b\n", sz);
+		fprintf(stderr, "Requesting too big string size: %db (%s)\n", sz, buf);
 		return 0;
 	}
 
@@ -328,6 +329,16 @@ int json_parse_value(char *str, char *output, JSONDataType_t *output_type, int *
 	while (str[i] != '\0')
 	{
 		c = str[i++];
+
+		if (ob_c == LITERAL_MAX_VALUE - 1)
+		{
+			fprintf(stderr, "Value is too long\n");
+
+			return -1;
+		}
+
+		if (!in_quote && json_is_ws(c))
+			continue;
 
 		if (in_quote)
 		{

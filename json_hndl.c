@@ -64,7 +64,7 @@ static int json_hndl_wk_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
 	JSONData_t   *data;
 	int  off;
 	int  r;
-	char buffer[KEY_MAX_SIZE] = {'\0'};
+	char buffer[LITERAL_MAX_SIZE] = {'\0'};
 
 	r = json_parse_key(json_str, buffer, &off);
 	if (r < 0)

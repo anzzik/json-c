@@ -64,6 +64,40 @@ JSONObject_t *json_start(char *json_str)
 	return json;
 }
 
+char *json_read_file(char *filename)
+{
+	FILE *fp;
+	int sz;
+	int read;
+	char *buf;
+       
+	fp = fopen(filename, "r");
+	if (!fp)
+	{
+		fprintf(stderr, "Opening file %s failed\n", filename);
+		return 0;
+	}
+
+	fseek(fp, 0, SEEK_END);
+	sz = ftell(fp);
+	rewind(fp);
+
+	buf = calloc(sz + 1, 1);
+
+	read = fread(buf, 1, sz, fp);
+	if (read != sz)
+	{
+		fprintf(stderr, "Failed to read the file completely\n");
+		fclose(fp);
+
+		return 0;
+	}
+
+	fclose(fp);
+
+	return buf;
+}
+
 void json_print(JSONObject_t *json_obj)
 {
 	if (!json_obj->data)
@@ -74,4 +108,5 @@ void json_print(JSONObject_t *json_obj)
 	else
 		json_object_print(json_obj);
 }
+
 
