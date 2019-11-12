@@ -7,6 +7,7 @@
 JSONObject_t *json_start(char *json_str);
 void json_print(JSONObject_t *json_obj);
 char *json_read_file(char *filename);
+void json_free(JSONObject_t *json_obj);
 
 #endif
 

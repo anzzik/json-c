@@ -7,13 +7,13 @@ typedef enum JSONDataType_e JSONDataType_t;
 typedef enum JSONParseState_e JSONParseState_t;
 
 typedef struct JSONObject_s JSONObject_t;
-typedef struct JSONData_s JSONData_t;
+typedef struct JSONKeyValuePair_s JSONKeyValuePair_t;
 typedef struct JSONDataArray_s JSONDataArray_t;
 typedef struct JSONStateHandler_s JSONStateHandler_t;
 
 struct JSONObject_s
 {
-	JSONData_t *data;
+	JSONKeyValuePair_t *first_kvp;
 	int is_array;
 	int ready;
 	int depth;
@@ -29,13 +29,13 @@ enum JSONDataType_e
 	TYPE_COUNT
 };
 
-struct JSONData_s
+struct JSONKeyValuePair_s
 {
 	JSONDataType_t type;
 	char *key;
 	void *val;
 
-	JSONData_t *next;
+	JSONKeyValuePair_t *next;
 };
 
 struct JSONDataArray_s

@@ -100,13 +100,18 @@ char *json_read_file(char *filename)
 
 void json_print(JSONObject_t *json_obj)
 {
-	if (!json_obj->data)
+	if (!json_obj->first_kvp)
 		return;
 
 	if (json_obj->is_array)
 		json_object_array_print(json_obj);
 	else
 		json_object_print(json_obj);
+}
+
+void json_free(JSONObject_t *json_obj)
+{
+	json_object_free(json_obj);
 }
 
 

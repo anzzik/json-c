@@ -32,7 +32,6 @@ JSONStateHandler_t *json_hndl_get_handlers()
 	return state_hndl;
 }
 
-
 static int json_hndl_initial_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
 {
 	int off;
@@ -61,7 +60,7 @@ static int json_hndl_initial_cb(char *json_str, void *u_ptr, JSONParseState_t *s
 static int json_hndl_wk_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
 {
 	JSONObject_t *json;
-	JSONData_t   *data;
+	JSONKeyValuePair_t   *kvp;
 	int  off;
 	int  r;
 	char buffer[LITERAL_MAX_SIZE] = {'\0'};
@@ -76,10 +75,10 @@ static int json_hndl_wk_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
 
 	json = u_ptr;
 
-	data      = json_data_new();
-	data->key = json_data_str_new(buffer);
+	kvp      = json_kvp_new();
+	kvp->key = json_str_new(buffer);
 
-	json_object_push(json, data);
+	json_object_push(json, kvp);
 
 	if (debug)
 		fprintf(stderr, "state to WAITING_COLON\n");
@@ -87,6 +86,10 @@ static int json_hndl_wk_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
 	*state = WAITING_COLON;
 
 	return off;
+
+l_err:
+	json_kvp_pop(json, 1);
+	return -1;
 }
 
 static int json_hndl_colon_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
@@ -112,18 +115,19 @@ static int json_hndl_colon_cb(char *json_str, void *u_ptr, JSONParseState_t *sta
 	*state = WAITING_VALUE;
 
 	return off;
-
 }
 
 static int json_hndl_wv_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
 {
 	JSONObject_t   *json;
-	JSONData_t     *data;
+	JSONKeyValuePair_t     *kvp;
 	JSONDataType_t  type;
+	JSONObject_t *new_obj = 0;
 
 	char buffer[LITERAL_MAX_SIZE] = {'\0'};
 	int  r;
 	int  off;
+	int  value_len;
 
 	off = 0;
 	while (json_is_ws(json_str[off]))
@@ -131,9 +135,9 @@ static int json_hndl_wv_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
 
 	json = u_ptr;
 
-	data = json_get_top_data(json);
+	kvp = json_kvp_top(json);
 
-	r = json_parse_value(json_str, buffer, &type, &off);
+	r = json_parse_value(json_str + off, buffer, &type, &value_len);
 	if (r != 0)
 	{
 		fprintf(stderr, "JSON value parsing failed at %s\n", json_str);
@@ -141,46 +145,53 @@ static int json_hndl_wv_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
 		return -1;
 	}
 
-	data->type = type;
-	if (data->type == NUMBER || data->type == STRING)
-		data->val = json_data_str_new(buffer);
-
-	if (data->type == OBJECT)
+	kvp->type = type;
+	switch (kvp->type)
 	{
-		JSONObject_t *o = json_object_new(json);
+		case STRING:
+		case NUMBER:
+			kvp->val = json_str_new(buffer);
+			break;
 
-		r = json_parse_object(json_str, o, &off, state_hndl);
-		if (r < 0)
-		{
-			fprintf(stderr, "JSON object parsing failed at '%s'\n", json_str + off);
+		case OBJECT:
+			new_obj = json_object_new(json);
 
-			return -1;
-		}
+			r = json_parse_object(json_str + off, new_obj, &value_len, state_hndl);
+			if (r < 0)
+			{
+				fprintf(stderr, "JSON object parsing failed at '%s'\n", json_str + off);
 
-		data->val = o;
-	}
+				goto l_err;
+			}
+			kvp->val = new_obj;
+			break;
 
-	if (data->type == ARRAY)
-	{
-		JSONObject_t *o = json_object_new(json);
+		case ARRAY:
+			new_obj = json_object_new(json);
 
-		r = json_parse_array(json_str, o, &off, state_hndl);
-		if (r < 0)
-		{
-			fprintf(stderr, "JSON array parsing failed at '%s'\n", json_str + off);
+			r = json_parse_array(json_str + off, new_obj, &value_len, state_hndl);
+			if (r < 0)
+			{
+				fprintf(stderr, "JSON array parsing failed at '%s'\n", json_str + off);
 
-			return -1;
-		}
+				goto l_err;
+			}
 
-		data->val = o;
+			kvp->val = new_obj;
+			break;
 	}
 
 	if (debug)
 		fprintf(stderr, "state to WAITING_VALUE_END\n");
 
+	off += value_len;
 	*state = WAITING_VALUE_END;
 
 	return off;
+
+l_err:
+	json_kvp_pop(json, 1);
+	return -1;
 }
 
 static int json_hndl_wve_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
@@ -196,7 +207,7 @@ static int json_hndl_wve_cb(char *json_str, void *u_ptr, JSONParseState_t *state
 
 	if (c != ',' && c != '}')
 	{
-		fprintf(stderr, "Expected \",\" or \"}\" at '%s'\n", json_str + off);
+		fprintf(stderr, "Eexpected \",\" or \"}\" at '%.5s'\n", json_str + off);
 		return -1;
 	}
 
@@ -234,9 +245,8 @@ static int json_hndl_ready_cb(char *json_str, void *u_ptr, JSONParseState_t *sta
 static int json_hndl_ai_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
 {
 	JSONObject_t *json;
-	JSONData_t *array_data;
+	JSONKeyValuePair_t *array_kvp;
 	int off;
-
 
 	off = 0;
 	while (json_is_ws(json_str[off]))
@@ -251,9 +261,9 @@ static int json_hndl_ai_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
 
 	json = u_ptr;
 	
-	array_data = json_data_new();
-	array_data->type = ARRAY;
-	json_object_push(json, array_data);
+	array_kvp = json_kvp_new();
+	array_kvp->type = ARRAY;
+	json_object_push(json, array_kvp);
 
 	if (debug)
 		fprintf(stderr, "state to ARRAY_WAITING_VALUE\n");
@@ -263,77 +273,102 @@ static int json_hndl_ai_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
 	off++;
 
 	return off;
+
+l_err:
+	json_kvp_pop(json, 1);
+	return -1;
 }
 
 static int json_hndl_awv_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
 {
-	JSONObject_t   *json;
-	JSONDataType_t  type;
+	JSONObject_t    *json;
+	JSONObject_t    *new_obj;
 	JSONDataArray_t *da;
+	JSONDataType_t   type;
 
 	char buffer[LITERAL_MAX_SIZE] = {'\0'};
 	int  r;
-	int  off;
-
-	off = 0;
-	while (json_is_ws(json_str[off]))
-		off++;
+	int  off = 0;
+	int  value_len = 0;
 
 	json = u_ptr;
 
-	r = json_parse_value(json_str, buffer, &type, &off);
-	if (r < 0)
+	if (!json->first_kvp)
 	{
-		fprintf(stderr, "JSON value parsing failed at %s\n", json_str);
-		
+		fprintf(stderr, "JSON object not initialized properly for array push\n");
+
 		return -1;
 	}
+
+	if (json->first_kvp->type != ARRAY)
+	{
+		fprintf(stderr, "JSON object's data is not ARRAY type\n");
+
+		return -1;
+	}
+
+	while (json_is_ws(json_str[off]))
+		off++;
 
 	da = json_data_array_new();
 	json_data_array_push(json, da);
 
+	r = json_parse_value(json_str + off, buffer, &type, &value_len);
+	if (r < 0)
+	{
+		fprintf(stderr, "JSON value parsing failed at %s\n", json_str);
+		
+		goto l_err;
+	}
+
 	da->type = type;
-
-	if (type == NUMBER || type == STRING)
-		da->data = json_data_str_new(buffer);
-
-	if (type == OBJECT)
+	switch (da->type)
 	{
-		JSONObject_t *o = json_object_new(json);
+		case NUMBER: 
+		case STRING:
+			da->data = json_str_new(buffer);
+			break;
 
-		r = json_parse_object(json_str, o, &off, state_hndl);
-		if (r < 0)
-		{
-			fprintf(stderr, "JSON object parsing failed at '%s'\n", json_str);
+		case OBJECT:
+			new_obj = json_object_new(json);
 
-			return -1;
-		}
+			r = json_parse_object(json_str + off, new_obj, &value_len, state_hndl);
+			if (r < 0)
+			{
+				fprintf(stderr, "JSON object parsing failed at '%.30s'\n", json_str + off);
 
-		da->data = o;
+				goto l_err;
+			}
+
+			da->data = new_obj;
+			break;
+
+		case ARRAY:
+			new_obj = json_object_new(json);
+
+			r = json_parse_array(json_str + off, new_obj, &value_len, state_hndl);
+			if (r < 0)
+			{
+				fprintf(stderr, "JSON array parsing failed at '%10.s'\n", json_str + off);
+
+				goto l_err;
+			}
+
+			da->data = new_obj;
+			break;
 	}
-
-	if (type == ARRAY)
-	{
-		JSONObject_t *o = json_object_new(json);
-
-		r = json_parse_array(json_str, o, &off, state_hndl);
-		if (r < 0)
-		{
-			fprintf(stderr, "JSON array parsing failed at '%s'\n", json_str);
-
-			return -1;
-		}
-
-		da->data = o;
-	}
-
 
 	if (debug)
 		fprintf(stderr, "state to ARRAY_WAITING_VALUE_END\n");
 
+	off += value_len;
 	*state = ARRAY_WAITING_VALUE_END;
 
 	return off;
+
+l_err:
+	json_data_array_pop(json->first_kvp, 1);
+	return -1;
 }
 
 static int json_hndl_awve_cb(char *json_str, void *u_ptr, JSONParseState_t *state)
@@ -349,7 +384,7 @@ static int json_hndl_awve_cb(char *json_str, void *u_ptr, JSONParseState_t *stat
 
 	if (c != ',' && c != ']')
 	{
-		fprintf(stderr, "Expected \",\" or \"]\" at '%s'\n", json_str + off);
+		fprintf(stderr, "Expected \",\" or \"]\" at '%.5s'\n", json_str + off);
 		return -1;
 	}
 

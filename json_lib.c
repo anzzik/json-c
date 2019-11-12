@@ -9,11 +9,11 @@ JSONObject_t *json_object_new(JSONObject_t *parent)
 {
 	JSONObject_t *obj = 0;
 
-	obj	   = malloc(sizeof(JSONObject_t));
-	obj->data  = 0;
-	obj->depth = 0;
-	obj->ready = 0;
-	obj->is_array = 0;
+	obj	        = malloc(sizeof(JSONObject_t));
+	obj->first_kvp  = 0;
+	obj->depth      = 0;
+	obj->ready      = 0;
+	obj->is_array   = 0;
 
 	if (parent)
 		obj->depth = parent->depth + 1;
@@ -21,17 +21,52 @@ JSONObject_t *json_object_new(JSONObject_t *parent)
 	return obj;
 }
 
-JSONData_t *json_data_new()
+void json_object_free(JSONObject_t *json_obj)
 {
-	JSONData_t *d = 0;
-	
-	d	  = malloc(sizeof(JSONData_t));
-	d->type   = UNDEFINED;
-	d->key    = 0;
-	d->val    = 0;
-	d->next   = 0;
+	JSONKeyValuePair_t *kvp;
 
-	return d;
+	if (!json_obj)
+		return;
+
+	while (json_obj->first_kvp)
+		json_kvp_pop(json_obj, 1);
+
+	free(json_obj);
+}
+
+JSONKeyValuePair_t *json_kvp_new()
+{
+	JSONKeyValuePair_t *kvp = 0;
+	
+	kvp	    = malloc(sizeof(JSONKeyValuePair_t));
+	kvp->type   = UNDEFINED;
+	kvp->key    = 0;
+	kvp->val    = 0;
+	kvp->next   = 0;
+
+	return kvp;
+}
+
+void json_kvp_free(JSONKeyValuePair_t *kvp)
+{
+	if (!kvp)
+		return;
+
+	json_str_free(kvp->key);
+
+	if (kvp->type == STRING || kvp->type == NUMBER)
+		json_str_free(kvp->val);
+
+	if (kvp->type == OBJECT)
+		json_object_free(kvp->val);
+
+	if (kvp->type == ARRAY)
+	{
+		while (kvp->val)
+			json_data_array_pop(kvp, 1);
+	}
+
+	free(kvp);
 }
 
 JSONDataArray_t *json_data_array_new()
@@ -46,16 +81,35 @@ JSONDataArray_t *json_data_array_new()
 	return da;
 }
 
+void json_data_array_free(JSONDataArray_t* da)
+{
+	if (!da->data)
+		return;
+
+	if (da->type == STRING || da->type == NUMBER)
+		json_str_free(da->data);
+
+	if (da->type == OBJECT)
+		json_object_free(da->data);
+
+	if (da->type == ARRAY)
+	{
+		JSONObject_t *array_obj = da->data;
+		while (array_obj->first_kvp->val)
+			json_data_array_pop(array_obj->first_kvp, 1);
+	}
+
+	free(da);
+}
+
 int json_parse_object(char *json_str, JSONObject_t *output_obj, int *offset, JSONStateHandler_t *state_handlers)
 {
 	JSONObject_t *json = output_obj;
 	JSONParseState_t state = INITIAL;
-	int len;
-	int i;
+	int i = 0;
+	int len = strlen(json_str);
 	int r;
 
-	len = strlen(json_str);
-	i = 0;
 	while (!json->ready && json_str[i] != '\0')
 	{
 		if (json_is_ws(json_str[i]))
@@ -64,9 +118,9 @@ int json_parse_object(char *json_str, JSONObject_t *output_obj, int *offset, JSO
 			continue;
 		}
 
-		for (int j = 0; j < STATE_COUNT; j++)
+		for (int s = 0; s < STATE_COUNT; s++)
 		{
-			if (j != state)
+			if (s != state)
 				continue;
 
 			r = state_handlers[state].func(json_str + i, json, &state);
@@ -75,7 +129,6 @@ int json_parse_object(char *json_str, JSONObject_t *output_obj, int *offset, JSO
 
 			break;
 		}
-
 
 		i += r;
 		if (i > len)
@@ -91,9 +144,9 @@ int json_parse_array(char *json_str, JSONObject_t *output_obj, int *offset, JSON
 {
 	JSONObject_t *json = output_obj;
 	JSONParseState_t state = ARRAY_INITIAL;
+	int len = strlen(json_str);
 	int i = 0;
 	int r;
-	int len = strlen(json_str);
 
 	while (json_str[i] != '\0')
 	{
@@ -152,21 +205,47 @@ int json_parse_array(char *json_str, JSONObject_t *output_obj, int *offset, JSON
 	return 0;
 }
 
-JSONData_t *json_get_top_data(JSONObject_t *json)
+JSONKeyValuePair_t *json_kvp_top(JSONObject_t *json)
 {
-	JSONData_t *d;
+	JSONKeyValuePair_t *kvp;
 
-	d = json->data;
-	if (!d)
+	kvp = json->first_kvp;
+	if (!kvp)
 		return 0;
 
-	while (d->next)
-		d = d->next;
+	while (kvp->next)
+		kvp = kvp->next;
 
-	return d;
+	return kvp;
 }
 
-char *json_data_str_new(char *buf)
+int json_kvp_pop(JSONObject_t *json, int do_free)
+{
+	JSONKeyValuePair_t *kvp;
+
+	kvp = json->first_kvp;
+	if (!kvp)
+		return 0;
+
+	if (!kvp->next)
+	{
+		json->first_kvp = 0;
+
+		return 0;
+	}
+
+	while (kvp->next->next)
+		kvp = kvp->next;
+
+	if (do_free)
+		json_kvp_free(kvp->next);
+
+	kvp->next = 0;
+
+	return 0;
+}
+
+char *json_str_new(char *buf)
 {
 	int  sz;
 	char *key_buf;
@@ -185,18 +264,26 @@ char *json_data_str_new(char *buf)
 	return key_buf;
 }
 
-int json_data_set_val(JSONData_t *data, void *val)
+void json_str_free(char *buf)
 {
-	switch (data->type)
+	if (!buf)
+		return;
+
+	free(buf);
+}
+
+int json_kvp_set_val(JSONKeyValuePair_t *kvp, void *val)
+{
+	switch (kvp->type)
 	{
 		case NUMBER:
 		case STRING:
-			data->val = calloc(strlen((char*)val) + 1, 1);
-			strncpy(data->val, (char*)val, strlen((char*)val) + 1);
+			kvp->val = calloc(strlen((char*)val) + 1, 1);
+			strncpy(kvp->val, (char*)val, strlen((char*)val) + 1);
 			break;
 
 		case OBJECT:
-			data->val = val;
+			kvp->val = val;
 			break;
 
 		default:
@@ -207,23 +294,23 @@ int json_data_set_val(JSONData_t *data, void *val)
 	return 0;
 }
 
-int json_object_push(JSONObject_t *json_obj, JSONData_t *json_data)
+int json_object_push(JSONObject_t *json_obj, JSONKeyValuePair_t *kvp)
 {
-	JSONData_t *tmp;
+	JSONKeyValuePair_t *kvp_it;
 
-	if (!json_obj->data)
+	if (!json_obj->first_kvp)
 	{
-		json_obj->data = json_data;
+		json_obj->first_kvp = kvp;
 
 		return 0;
 	}
 
-	tmp = json_obj->data;
-	while (tmp->next)
-		tmp = tmp->next;
+	kvp_it = json_obj->first_kvp;
+	while (kvp_it->next)
+		kvp_it = kvp_it->next;
 
-	tmp->next = json_data;
-	json_data->next = 0;
+	kvp_it->next = kvp;
+	kvp->next = 0;
 
 	return 0;
 }
@@ -232,24 +319,10 @@ int json_data_array_push(JSONObject_t *json_array_obj, JSONDataArray_t *json_arr
 {
 	JSONDataArray_t *da;
 
-	if (!json_array_obj->data)
-	{
-		fprintf(stderr, "JSON object not initialized properly for array push\n");
-
-		return -1;
-	}
-
-	if (json_array_obj->data->type != ARRAY)
-	{
-		fprintf(stderr, "JSON object's data is not ARRAY type\n");
-
-		return -1;
-	}
-
-	da = json_array_obj->data->val;
+	da = json_array_obj->first_kvp->val;
 	if (!da)
 	{
-		json_array_obj->data->val = json_array_data;
+		json_array_obj->first_kvp->val = json_array_data;
 
 		return 0;
 	}
@@ -259,6 +332,42 @@ int json_data_array_push(JSONObject_t *json_array_obj, JSONDataArray_t *json_arr
 
 	da->next = json_array_data;
 	json_array_data->next = 0;
+
+	return 0;
+}
+
+int json_data_array_pop(JSONKeyValuePair_t *kvp, int do_free)
+{
+	JSONDataArray_t *da;
+
+	if (!kvp)
+		return 0;
+
+	if (kvp->type != ARRAY)
+	{
+		fprintf(stderr, "JSON object's data is not ARRAY type\n");
+
+		return -1;
+	}
+
+	da = kvp->val;
+	if (!da)
+		return 0;
+
+	if (!da->next)
+	{
+		kvp->val = 0;
+
+		return 0;
+	}
+
+	while (da->next->next)
+		da = da->next;
+
+	if (do_free)
+		json_data_array_free(da->next);
+
+	da->next = 0;
 
 	return 0;
 }
@@ -415,38 +524,38 @@ int json_parse_value(char *str, char *output, JSONDataType_t *output_type, int *
 
 void json_object_print(JSONObject_t *json_obj)
 {
-	if (!json_obj->data)
+	if (!json_obj->first_kvp)
 		return;
 
-	JSONData_t *d = json_obj->data;
+	JSONKeyValuePair_t *kvp = json_obj->first_kvp;
 
 	printf("{\n");
-	while (d)
+	while (kvp)
 	{
 		for (int i = 0; i < json_obj->depth + 1; i++)
 			printf("\t");
 
-		printf("\"%s\": ", d->key);
+		printf("\"%s\": ", kvp->key);
 
-		if (d->type == OBJECT)
+		if (kvp->type == OBJECT)
 		{
-			json_object_print(d->val);
+			json_object_print(kvp->val);
 		}
-		else if (d->type == ARRAY)
+		else if (kvp->type == ARRAY)
 		{
 			fprintf(stderr, "calling array print\n");
-			json_object_array_print(d->val);
+			json_object_array_print(kvp->val);
 			printf(",");
 		}
 		else
 		{
-			if (d->type == STRING)
-				printf("\"%s\",\n", (char*)d->val);
+			if (kvp->type == STRING)
+				printf("\"%s\",\n", (char*)kvp->val);
 			else
-				printf("%s,\n", (char*)d->val);
+				printf("%s,\n", (char*)kvp->val);
 		}
 
-		d = d->next;
+		kvp = kvp->next;
 	}
 
 	for (int i = 0; i < json_obj->depth; i++)
@@ -461,12 +570,12 @@ void json_object_print(JSONObject_t *json_obj)
 
 void json_object_array_print(JSONObject_t *json_obj)
 {
-	if (!json_obj->data)
+	if (!json_obj->first_kvp)
 		return;
 
 	JSONDataArray_t *da;
 
-	da = json_obj->data->val;
+	da = json_obj->first_kvp->val;
 
 	printf("[");
 	while (da)

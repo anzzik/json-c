@@ -26,7 +26,8 @@ int main(void)
 
 	json_print(obj);
 
+	json_free(obj);
+
 	return 0;
 }
-
 
