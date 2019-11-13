@@ -23,8 +23,6 @@ JSONObject_t *json_object_new(JSONObject_t *parent)
 
 void json_object_free(JSONObject_t *json_obj)
 {
-	JSONKeyValuePair_t *kvp;
-
 	if (!json_obj)
 		return;
 
