@@ -16,6 +16,7 @@ int main(void)
 		return -1;
 	}
 
+
 	JSONObject_t *obj = json_start(json_str);
 	if (!obj)
 	{
@@ -26,6 +27,7 @@ int main(void)
 
 	json_print(obj);
 
+	free(json_str);
 	json_free(obj);
 
 	return 0;

@@ -49,6 +49,8 @@ JSONKeyValuePair_t *json_kvp_new()
 
 void json_kvp_free(JSONKeyValuePair_t *kvp)
 {
+	int r;
+
 	if (!kvp)
 		return;
 
@@ -63,7 +65,11 @@ void json_kvp_free(JSONKeyValuePair_t *kvp)
 	if (kvp->type == ARRAY)
 	{
 		while (kvp->val)
-			json_data_array_pop(kvp, 1);
+		{
+			r = json_data_array_pop(kvp, 1);
+			if (r < 0)
+				fprintf(stderr, "Error in json_data_array_pop()");
+		}
 	}
 
 	free(kvp);
@@ -219,28 +225,39 @@ JSONKeyValuePair_t *json_kvp_top(JSONObject_t *json)
 	return kvp;
 }
 
-int json_kvp_pop(JSONObject_t *json, int do_free)
+int json_kvp_list_len(JSONObject_t *json)
 {
-	JSONKeyValuePair_t *kvp;
+	JSONKeyValuePair_t **kvp_mem;
+	int c = 0;
 
-	kvp = json->first_kvp;
-	if (!kvp)
+	kvp_mem = &json->first_kvp;
+	if (!(*kvp_mem))
 		return 0;
 
-	if (!kvp->next)
+	while (*kvp_mem)
 	{
-		json->first_kvp = 0;
-
-		return 0;
+		kvp_mem = &((*kvp_mem)->next);
+		c++;
 	}
 
-	while (kvp->next->next)
-		kvp = kvp->next;
+	return c;
+}
+
+int json_kvp_pop(JSONObject_t *json, int do_free)
+{
+	JSONKeyValuePair_t **kvp_mem;
+
+	kvp_mem = &json->first_kvp;
+	if (!(*kvp_mem))
+		return 0;
+
+	while ((*kvp_mem)->next)
+		kvp_mem = &((*kvp_mem)->next);
 
 	if (do_free)
-		json_kvp_free(kvp->next);
+		json_kvp_free(*kvp_mem);
 
-	kvp->next = 0;
+	*kvp_mem = 0;
 
 	return 0;
 }
@@ -336,12 +353,27 @@ int json_data_array_push(JSONObject_t *json_array_obj, JSONDataArray_t *json_arr
 	return 0;
 }
 
+int json_data_array_list_len(JSONKeyValuePair_t *kvp)
+{
+	JSONDataArray_t **da_mem;
+	int c = 0;
+
+	da_mem = (JSONDataArray_t**)&kvp->val;
+	while (*da_mem)
+	{
+		da_mem = &(*da_mem)->next;
+		c++;
+	}
+
+	return c;
+}
+
 int json_data_array_pop(JSONKeyValuePair_t *kvp, int do_free)
 {
-	JSONDataArray_t *da;
+	JSONDataArray_t **da_mem;
 
 	if (!kvp)
-		return 0;
+		return -1;
 
 	if (kvp->type != ARRAY)
 	{
@@ -350,24 +382,17 @@ int json_data_array_pop(JSONKeyValuePair_t *kvp, int do_free)
 		return -1;
 	}
 
-	da = kvp->val;
-	if (!da)
+	da_mem = (JSONDataArray_t**)&kvp->val;
+	if (!(*da_mem))
 		return 0;
 
-	if (!da->next)
-	{
-		kvp->val = 0;
-
-		return 0;
-	}
-
-	while (da->next->next)
-		da = da->next;
+	while ((*da_mem)->next)
+		da_mem = &(*da_mem)->next;
 
 	if (do_free)
-		json_data_array_free(da->next);
+		json_data_array_free(*da_mem);
 
-	da->next = 0;
+	*da_mem = 0;
 
 	return 0;
 }
